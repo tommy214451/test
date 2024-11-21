@@ -1,12 +1,14 @@
 #include <stdio.h>
+#include <strings.h>
+#include <stdlib.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <pthread.h>
 
-int main(void) {
-    printf("Hello, World!\n");
-    return 0;
-}
-//Test um zu sehen ob die änderungen bei git hub ankommen
-
-
+#define PORT 80
+#define REPLY_MESSAGE "Reply"
+#define MAXLINE 4096
 
 int main (int argc, char **argv)
 {
@@ -20,21 +22,25 @@ int main (int argc, char **argv)
     //Aufgabe 2.1
     // TCP-Socket erstellen und kofigurieren
     if((listenfd = socket(AF_INET, SOCK_STREAM, 0))< 0 )
-        err_n_die("socket error.");
+        perror("socket error.");
+        exit(EXIT_FAILURE);
 
-    //Die Adressstruktur definieren
+    //Die Adressse und Port definieren
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sin_family        = AF_INET;               //Familie des Sockets
-    servaddr.sin_addr.sin_addr = htonl(INADDR_ANY);     //IP-Adresse binden
-    servaddr.sin_port          = htons (SERVER_PORT);   //Portnummer binden
+    servaddr.sin_addr.s_addr   = htonl(INADDR_ANY);     //IP-Adresse binden
+    servaddr.sin_port          = htons (PORT);   //Portnummer binden
 
 
-    //Listen(um auf eingehende Verbindungen zu warten) & Bind(zum Binden des Sockets an eine Adresse)
-    if ((bind(listenfd,(SA*) &servaddr, sizeof(servaddr)))< 0)
-        err_n_die("bind error.");
+    //Bind(zum Binden des Sockets an eine Adresse)
+    if ((bind(listenfd,(struct sockaddr*)&servaddr, sizeof(servaddr)))< 0)
+        perror("bind error.");
+        exit(EXIT_FAILURE);
 
+    //Listen(um auf eingehende Verbindungen zu warten)
     if((listen(listenfd, 10)) < 0)
-        err_n_die("listen error.");     //Fehlermeldung, wenn der Listening-Modus nicht aktiviert werden kann.
+        perror("listen error.");
+        exit(EXIT_FAILURE);
 
     //setsockopt SO_REUSEADDR muss noch implementiert werden
 
