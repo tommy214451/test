@@ -8,8 +8,8 @@
 #include <string.h>
 
 #define PORT 4711
-#define REPLY_MESSAGE "Reply"
 #define MAXLINE 4096
+#define BUFFER_SIZE 8192
 
 // HTTP-Statuscodes und Antworten definieren
 #define RESPONSE_400 "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"
@@ -52,50 +52,89 @@ int main (int argc, char **argv)
 
     // setsockopt SO_REUSEADDR muss noch implementiert werden
 
-    // Aufgabe 2.2 Anfragen beantworten
-    // Bei jedem empfangenen Paket mit dem String "Reply" antworten
-    // accept(annehmen), recv(empfangen), send(senden) implementieren
 
-    // Aufgabe 2.3 Pakete erkennen
-    // Auf jedes empfangene HTTP-Paket soll mit dem String "Reply\r\n\r\n" geantwortet werden
 
     // Server startet und wartet auf eingehende Verbindungen
-    printf("Server läuft auf Port %d...\n", PORT);
+    //printf("Server läuft auf Port %d...\n", PORT);
 
+    // Aufgabe 2.2+ 2.3 Anfragen beantworten
     while (1) {
+        struct sockaddr_in cl_addr;
+        socklen_t cl_len = sizeof(cl_addr);
+
         // Verbindung akzeptieren
         if ((connfd = accept(listenfd, (struct sockaddr*)NULL, NULL)) < 0) {
             perror("accept error");
             continue;
         }
 
-        // Daten vom Client empfangen
-        int n = recv(connfd, recvline, MAXLINE, 0);
-        if (n < 0) {
-            perror("recv error");
-            close(connfd);
-            continue;
+        char buffer[BUFFER_SIZE];
+        char response[] = "Reply\r\n\r\n";
+        ssize_t bytes_read;
+        size_t buffer_offset = 0;
+
+        while (1) {
+            bytes_read = read(connfd, buffer + buffer_offset, BUFFER_SIZE - buffer_offset - 1);
+            if (bytes_read <= 0) {
+                if (bytes_read < 0)
+                    perror("error reading socket");
+                break;
+            }
+
+            buffer_offset += bytes_read;
+            buffer[buffer_offset] = '\0';
+
+            char *request_end;
+
+            while ((request_end = strstr(buffer, "\r\n\r\n")) != NULL) {
+                size_t request_length = request_end - buffer + 4;
+
+                if (write(connfd, response, strlen(response)) < 0) {
+                    perror("error sending response");
+                    break;
+                }
+
+                // Aufgabe 2.4 Syntaktisch korrekte Antworten
+                // Auf jede Anfrage soll mit dem Statuscode 400: Bad Request geantwortet werden
+
+                char method[16], uri[256], version[16];
+                if (sscanf((char*)recvline, "%15s %255s %15s", method, uri, version) != 3) {
+                    printf("Ungültige Anfrage, sende 400 Bad Request\n");
+                    send(connfd, RESPONSE_400, strlen(RESPONSE_400), 0);
+                    close(connfd);
+                    continue;
+                }
+
+                size_t remaining_data = buffer_offset - request_length;
+                memmove(buffer, buffer + request_length, remaining_data);
+
+                buffer_offset = remaining_data;
+                buffer[buffer_offset] = '\0';
+            }
         }
 
-        recvline[n] = 0; // Null-terminieren
-        printf("Empfangene Anfrage: \n%s\n", recvline);
+        // Daten vom Client empfangen
+        //int n = recv(connfd, recvline, MAXLINE, 0);
+        //if (n < 0) {
+        //    perror("recv error");
+        //    close(connfd);
+        //    continue;
+        //}
+
+        //recvline[n] = 0; // Null-terminieren
+        //printf("Empfangene Anfrage: \n%s\n", recvline);
+
 
         // Aufgabe 2.4 Syntaktisch korrekte Antworten
         // Auf jede Anfrage soll mit dem Statuscode 400: Bad Request geantwortet werden
-        char method[16], uri[256], version[16];
-        if (sscanf((char*)recvline, "%15s %255s %15s", method, uri, version) != 3) {
-            printf("Ungültige Anfrage, sende 400 Bad Request\n");
-            send(connfd, RESPONSE_400, strlen(RESPONSE_400), 0);
-            close(connfd);
-            continue;
-        }
+
 
         // Aufgabe 2.5 Semantisch korrekte Antworten
         // Empfangene Anfragen als HTTP-Pakete parsen
-        if (strcmp(method, "GET") == 0) {
+        /*if (strcmp(method, "GET") == 0) {
             // Wenn Methode GET ist, aber die Ressource unbekannt
-            if (strcmp(uri, "/static/foo") != 0) {
-                printf("GET-Anfrage für unbekannte Ressource, sende 404 Not Found\n");
+           if (strcmp(uri, "/static/foo") != 0) {
+               printf("GET-Anfrage für unbekannte Ressource, sende 404 Not Found\n");
                 send(connfd, RESPONSE_404, strlen(RESPONSE_404), 0);
             } else {
                 printf("GET-Anfrage für bekannte Ressource\n");
@@ -106,7 +145,7 @@ int main (int argc, char **argv)
             // Alle anderen Methoden außer GET sind nicht implementiert
             printf("Nicht unterstützte Methode: %s, sende 501 Not Implemented\n", method);
             send(connfd, RESPONSE_501, strlen(RESPONSE_501), 0);
-        }
+        } */
 
         close(connfd);
     }
