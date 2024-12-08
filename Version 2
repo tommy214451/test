@@ -1,0 +1,137 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+
+#define MAX_BUFFER_SIZE 8192
+
+// Funktion zum Parsen der Adresse und des Ports
+static struct sockaddr_in derive_sockaddr(const char* host, const char* port) {
+    struct addrinfo hints = {0};
+    struct addrinfo *result_info;
+    struct sockaddr_in result;
+
+    hints.ai_family = AF_INET;
+
+    // Hole die Adresseinformationen für den gegebenen Host und Port
+    int returncode = getaddrinfo(host, port, &hints, &result_info);
+    if (returncode != 0) {
+        fprintf(stderr, "Error parsing host/port: %s\n", gai_strerror(returncode));
+        exit(EXIT_FAILURE);
+    }
+
+    // Kopiere die Adresse
+    result = *((struct sockaddr_in*) result_info->ai_addr);
+
+    freeaddrinfo(result_info);
+    return result;
+}
+
+// Funktion zum Erstellen eines Sockets und Binden an die Adresse
+int create_server_socket(const char *host, const char *port) {
+    int server_fd;
+    struct sockaddr_in server_addr;
+
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd == -1) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    server_addr = derive_sockaddr(host, port);
+
+    // Setze SO_REUSEADDR, um Port-Probleme zu vermeiden
+    int opt = 1;
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        perror("setsockopt failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("Binding failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (listen(server_fd, 10) < 0) {
+        perror("Listen failed");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Server listening on %s:%s\n", host, port);
+    return server_fd;
+}
+
+// Funktion zum Beantworten der HTTP-Anfragen mit verschiedenen Statuscodes
+void handle_request(int client_fd, const char *request) {
+    char response[1024];
+
+    // Verarbeite einfache GET-Anfragen
+    if (strncmp(request, "GET /static/foo", 15) == 0) {
+        snprintf(response, sizeof(response),
+                 "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nFoo");
+    } else if (strncmp(request, "GET /static/bar", 15) == 0) {
+        snprintf(response, sizeof(response),
+                 "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nBar");
+    } else if (strncmp(request, "GET /static/baz", 15) == 0) {
+        snprintf(response, sizeof(response),
+                 "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nBaz");
+    } else if (strncmp(request, "GET /", 4) == 0) {
+        snprintf(response, sizeof(response),
+                 "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\nPage Not Found");
+    } else {
+        snprintf(response, sizeof(response),
+                 "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nBad Request");
+    }
+
+    send(client_fd, response, strlen(response), 0);
+}
+
+int main(int argc, char *argv[]) {
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <host> <port>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    // Server-Socket erstellen und binden
+    int server_fd = create_server_socket(argv[1], argv[2]);
+
+    while (1) {
+        int client_fd;
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+
+        // Akzeptiere eingehende Verbindungen
+        client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
+        if (client_fd < 0) {
+            perror("Accept failed");
+            continue;
+        }
+
+        // Anfrage empfangen
+        char buffer[MAX_BUFFER_SIZE];
+        ssize_t bytes_received = recv(client_fd, buffer, sizeof(buffer), 0);
+        if (bytes_received < 0) {
+            perror("Recv failed");
+            close(client_fd);
+            continue;
+        }
+
+        buffer[bytes_received] = '\0';  // Null-Terminierung der empfangenen Anfrage
+
+        printf("Received request: \n%s\n", buffer);
+
+        // Anfrage behandeln und beantworten
+        handle_request(client_fd, buffer);
+
+        // Verbindung schließen
+        close(client_fd);
+    }
+
+    // Server-Socket schließen
+    close(server_fd);
+    return 0;
+}
