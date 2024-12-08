@@ -6,6 +6,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #define MAX_BUFFER_SIZE 8192
 
@@ -69,8 +71,56 @@ int create_server_socket(const char *host, const char *port) {
 void handle_request(int client_fd, const char *request) {
     char response[1024];
 
-    // Verarbeite einfache GET-Anfragen
-    if (strncmp(request, "GET /static/foo", 15) == 0) {
+    // Verarbeite PUT-Anfragen für /dynamic/
+    if (strncmp(request, "PUT /dynamic/", 13) == 0) {
+        char resource_path[1024];
+        snprintf(resource_path, sizeof(resource_path), ".%s", request + 13); // Dateipfad extrahieren
+
+        // Hole die Content-Daten aus der Anfrage
+        char *content_data = strstr(request, "\r\n\r\n");  // Beginnt nach den Headern
+        if (content_data != NULL) {
+            content_data += 4;  // Überspringe die Header ("\r\n\r\n")
+
+            // Schreibe die Daten in eine Datei, die den Ressourcennamen trägt
+            FILE *file = fopen(resource_path, "w");
+            if (file != NULL) {
+                fwrite(content_data, 1, strlen(content_data), file);
+                fclose(file);
+                snprintf(response, sizeof(response),
+                         "HTTP/1.1 201 Created\r\nContent-Type: text/plain\r\n\r\nResource Created");
+            } else {
+                snprintf(response, sizeof(response),
+                         "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\nFailed to Create Resource");
+            }
+        } else {
+            snprintf(response, sizeof(response),
+                     "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nBad Request (No Content)");
+        }
+    }
+    // Verarbeite DELETE-Anfragen für /dynamic/
+    else if (strncmp(request, "DELETE /dynamic/", 16) == 0) {
+        char resource_path[1024];
+        snprintf(resource_path, sizeof(resource_path), ".%s", request + 16); // Dateipfad extrahieren
+
+        // Überprüfe, ob die Ressource existiert
+        struct stat buffer;
+        if (stat(resource_path, &buffer) == 0) {
+            // Lösche die Datei
+            if (remove(resource_path) == 0) {
+                snprintf(response, sizeof(response),
+                         "HTTP/1.1 204 No Content\r\nContent-Type: text/plain\r\n\r\nResource Deleted");
+            } else {
+                snprintf(response, sizeof(response),
+                         "HTTP/1.1 500 Internal Server Error\r\nContent-Type: text/plain\r\n\r\nFailed to Delete Resource");
+            }
+        } else {
+            // Wenn die Ressource nicht existiert
+            snprintf(response, sizeof(response),
+                     "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\nResource Not Found");
+        }
+    }
+    // Verarbeite GET-Anfragen
+    else if (strncmp(request, "GET /static/foo", 15) == 0) {
         snprintf(response, sizeof(response),
                  "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nFoo");
     } else if (strncmp(request, "GET /static/bar", 15) == 0) {
@@ -82,11 +132,24 @@ void handle_request(int client_fd, const char *request) {
     } else if (strncmp(request, "GET /", 4) == 0) {
         snprintf(response, sizeof(response),
                  "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\nPage Not Found");
-    } else {
+    }
+    // Verarbeite HEAD-Anfragen und antworte mit 501
+    else if (strncmp(request, "HEAD /", 6) == 0) {
+        snprintf(response, sizeof(response),
+                 "HTTP/1.1 501 Not Implemented\r\nContent-Type: text/plain\r\n\r\nHEAD method is not supported");
+    }
+    // Verarbeite PUT und DELETE Anfragen außerhalb von /dynamic/
+    else if (strncmp(request, "PUT /", 5) == 0 || strncmp(request, "DELETE /", 8) == 0) {
+        snprintf(response, sizeof(response),
+                 "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\n\r\nForbidden");
+    }
+    // Fehlerfall: Ungültige Anfrage
+    else {
         snprintf(response, sizeof(response),
                  "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nBad Request");
     }
 
+    // Sende die Antwort an den Client
     send(client_fd, response, strlen(response), 0);
 }
 
